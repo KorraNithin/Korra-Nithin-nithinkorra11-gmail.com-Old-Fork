@@ -81,8 +81,29 @@ technically satisfies "the org has an owner on paper" while leaving nobody able 
 **What would change my mind:** A hidden test expecting a suspended owner to still block
 removal of the last other owner.
 
-<!-- Copy the block above per decision. The two stubs below show the required shape and contain no
-     engineering content — replace or delete them. -->
+---
+
+### `auditDenials` only logs a `403`, not every non-2xx outcome
+
+**What I chose:** `auditDenials()` in `server/audit.js` writes a `deny` row only when the error
+it catches is an `HttpError` with `status === 403`. A `401`, `404`, or `400` is rethrown without
+being logged.
+
+**Why:** Verified with an ad hoc test: calling `auditDenials` with a function that throws
+`forbidden('missing permission: device:control', 'missing_permission')` produces a logged row
+with `result: 'deny'` and `reason_code: 'missing_permission'`; calling it with a function that
+throws `notFound()` rethrows the error with no row written. `PERMISSIONS.md §8` frames the audit
+log as answering "who tried to change what" — an authorization question. `401` is an identity
+question, `404` is structural invisibility (`PERMISSIONS.md §6`), and `400` is malformed input;
+none of those are a permission system saying no to someone who has standing to ask.
+
+**What I rejected:** Logging every non-2xx outcome as a "denial." It would flood the log with
+things unrelated to authority — a typo'd JSON body would produce the same shape of row as
+someone deliberately probing a permission they don't have, which defeats the log's purpose of
+answering exactly one question precisely.
+
+**What would change my mind:** A hidden test expecting a `401` or `404` to also produce an
+audit row.
 
 ---
 
