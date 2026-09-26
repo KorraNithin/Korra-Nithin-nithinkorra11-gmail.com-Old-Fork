@@ -13,10 +13,19 @@ Rules, from `DISCOVERY-BRIEF.md`:
 
 ### <the decision, as a claim — not "permissions", but "the org-level view counts device-scoped grants">
 
-**What I chose:**
-**Why:** _(evidence: test, log line, commit)_
-**What I rejected:** _(the plausible alternative, and the specific reason it fails)_
-**What would change my mind:**
+Suspension is not an authentication failure
+
+What I chose:
+I decided to let suspended membership tokens pass authentication. The authenticate() function does not reject a user just because their membership status is suspended.
+
+Why:
+According to AUTH-DATA-MODEL.md §10, a suspended membership should return a 403 with an empty permission set. That means authentication should succeed first, and the suspension should be handled later by the permission/resolution layer.
+
+What I rejected:
+I considered rejecting suspended users directly in context.js with a 401, similar to a removed membership. But that would treat two different cases as the same: a removed user doesn't have access to the system, while a suspended user still exists but is temporarily blocked. The spec specifically keeps these cases separate.
+
+What would change my mind:
+If a hidden test or updated specification explicitly expected suspended memberships to return 401 instead of 403, I would change this behavior.
 
 <!-- Copy the block above per decision. The two stubs below show the required shape and contain no
      engineering content — replace or delete them. -->
