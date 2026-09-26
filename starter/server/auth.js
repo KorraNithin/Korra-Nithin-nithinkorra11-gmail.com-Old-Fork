@@ -71,12 +71,60 @@ export function issueAccessToken({ userId, orgId, role, permVersion }, secret) {
 // `node scripts/check-jwt.js` is the public test suite for this function.
 // ---------------------------------------------------------------------------
 export function verifyAccessToken(token, secret) {
-  // YOURS TO WRITE. Every failure mode listed above must be a 401 UNAUTHENTICATED.
-  // `node scripts/check-jwt.js` is the public suite for this function.
-  throw Object.assign(
-    new Error('TODO: server/auth.js — verifyAccessToken() is yours to write (AUTH-DATA-MODEL.md §10).'),
-    { code: 'NOT_IMPLEMENTED' }
-  );
+  if (typeof token !== 'string' || token.length === 0) {
+    throw unauthenticated('malformed token');
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
+    throw unauthenticated('malformed token');
+  }
+  const [h, p, s] = parts;
+
+  let header, payload;
+  try {
+    header = JSON.parse(unb64(h).toString('utf8'));
+  } catch {
+    throw unauthenticated('malformed header');
+  }
+  try {
+    payload = JSON.parse(unb64(p).toString('utf8'));
+  } catch {
+    throw unauthenticated('malformed payload');
+  }
+
+  const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  if (!isPlainObject(header) || !isPlainObject(payload)) {
+    throw unauthenticated('malformed token');
+  }
+
+  // Pin the algorithm. Read the header, never trust it: only HS256/JWT is acceptable,
+  // whatever the header itself claims. This is the alg:none / algorithm-substitution defence.
+  if (header.alg !== ALG || header.typ !== 'JWT') {
+    throw unauthenticated('unsupported algorithm');
+  }
+
+  // Signature, compared in constant time. Guard the length check ourselves —
+  // timingSafeEqual throws on a length mismatch instead of returning false.
+  let signature;
+  try {
+    signature = unb64(s);
+  } catch {
+    throw unauthenticated('malformed signature');
+  }
+  const expected = createHmac('sha256', secret).update(`${h}.${p}`).digest();
+  if (signature.length !== expected.length || !timingSafeEqual(signature, expected)) {
+    throw unauthenticated('bad signature');
+  }
+
+  const { exp, iss, aud, jti } = payload;
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof exp !== 'number' || exp <= now) throw unauthenticated('token expired');
+  if (iss !== ISS) throw unauthenticated('bad issuer');
+  if (aud !== AUD) throw unauthenticated('bad audience');
+  if (typeof jti !== 'string' || jti.length === 0) throw unauthenticated('missing jti');
+
+  return payload;
 }
 
 

@@ -31,9 +31,7 @@ What did the starting line actually look like, and which failure surprised you?_
 
 ## Phase 1 — token verification
 
-_What did you expect each failure mode to look like before you ran it? Which one behaved
-differently from your expectation, and what did that tell you?_
-
+Implemented verifyAccessToken and handled an important edge case with timingSafeEqual, which throws an error when the compared values have different lengths. I added a length check before comparison. After the fix, check-jwt.js passed all 43/43 tests, covering invalid token structure, algorithm substitution, signature mismatch, expired tokens, incorrect issuer/audience, and missing jti.
 ## Phase 2 — caller context and the resolution engine
 
 _This is where most people's first model is wrong. Write down the model you started with, the
