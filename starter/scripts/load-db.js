@@ -1,13 +1,17 @@
-// Loads db/schema.sql, db/reference.sql, then seed/orgs.json.
-// Idempotent: drops and recreates app.db.  Run: npm run db:reset
-
 import { readFileSync, rmSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { openDatabase, newId } from '../server/db.js';
 import { hashPassword } from '../server/auth.js';
 import { readNonce, buildOverlay, applyOverlay, describeOverlay } from './personalise.js';
 
 const DB_FILE = process.env.DATABASE_FILE ?? 'app.db';
-const here = (p) => new URL(p, import.meta.url).pathname;
+// fileURLToPath, not `.pathname` -- on Windows a file:// URL's .pathname keeps a
+// leading slash before the drive letter ('/C:/Rhinostream/...'), which Windows then
+// resolves as "root of the current drive" and prepends C:\ again, producing a
+// literal 'C:\C:\...' path. fileURLToPath handles the platform difference correctly;
+// check-permissions.js and check-jwt.js never hit this because they pass the URL
+// object straight into readFileSync instead of extracting .pathname first.
+const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 
 for (const suffix of ['', '-wal', '-shm']) {
   if (existsSync(DB_FILE + suffix)) rmSync(DB_FILE + suffix);

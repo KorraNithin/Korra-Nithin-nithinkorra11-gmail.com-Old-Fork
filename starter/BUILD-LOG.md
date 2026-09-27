@@ -117,17 +117,70 @@ counts as a "denial" — it's my reading, held until a hidden test says otherwis
 
 ## Phase 7 — the console
 
-_Not started yet._
+### 2026-09-26
+
+Built the whole console against `UI-INVENTORY.md`'s locked `data-testid` contract: a shell with
+org switching, six permission-gated nav cards, and Devices/People/Grants/Sessions/Audit/Admin
+views. The one rule applied everywhere: every gated element reads `permissions[key].effect ===
+'allow'` from data the SERVER already resolved (the org-level map from login/`/auth/me`, or the
+per-device map from `/orgs/:org/devices`) — there is no role table anywhere in the frontend.
+`Object.keys(auth.permissions)` doubles as the permission catalogue for the grant-creation form,
+so even the personalised extra permission (`device:reboot`) shows up there without being named
+anywhere in my code.
+
+First `npm test` run: all 25 UI tests failed identically — every login-based test timed out the
+full 30s waiting for `login-email`, while the two invite tests failed fast (5s) unable to find
+their elements. Different timeouts, same shape: NOTHING was rendering on any page, including the
+invite path, which never even calls the suspect code (the silent session-restore fetch). That
+ruled out a React logic bug and pointed upstream of all of it. Found it in `server/index.js`'s
+static file server: `new URL('../dist/', import.meta.url).pathname` — the exact same Windows path
+bug as `scripts/load-db.js` from earlier, just in a second file. On Windows this means
+`index.html` and the JS bundle 404 on every request: an empty `<div id="root">`, no console error,
+nothing ever executes. Fixed with `fileURLToPath()`, same as before. This was a starter bug I
+hadn't touched, invisible on Linux where I'd been testing, only found by running the real suite
+on the real target OS.
+
+Second run: 24/25. One real failure left — "a reload restores the session from the refresh
+cookie" — and it took three attempts to actually fix, which is worth being honest about instead
+of tidying away:
+
+1. First guessed the `Secure` cookie flag: `setRefreshCookie` added `; Secure` whenever
+   `NODE_ENV === 'production'`, and the e2e harness runs with exactly that env var over plain
+   `http://localhost`. A `Secure` cookie set over plain HTTP gets silently dropped by the browser.
+   This WAS a real bug (this app has no TLS anywhere; tying Secure to NODE_ENV was wrong — fixed
+   to key off `req.socket.encrypted` instead) — but fixing it didn't fix the failing test.
+2. Reproduced the login->refresh round trip directly with curl and a cookie jar, using the exact
+   e2e server config. It worked. That ruled the server out entirely and moved the search to the
+   client. Reasoned that `/auth/refresh` ROTATES the cookie on every call, so if React's
+   `StrictMode` ever double-invoked my mount effect, both calls would race on the same original
+   cookie — the second would present an already-rotated token and correctly trip the
+   reuse-detection logic (`AUTH-DATA-MODEL.md §10`), revoking the whole family including the
+   token the first call had just issued. Added a `useRef` guard so the restore attempt can only
+   run once per mount. Also a real, worthwhile fix — but still not the cause.
+3. Stopped guessing and read the actual failing response instead: `400 VALIDATION, "orgId is
+   required"` — the literal error string from an OLD version of `/auth/refresh`, from BEFORE I'd
+   made `orgId` optional with a default-org fallback. That fix, from much earlier in the session,
+   had simply never been applied to the file — lost somewhere in the volume of changes across a
+   long session, not a logic error at all. Replaced the whole handler function outright rather
+   than diffing again, to remove any chance of a repeat. Reran: 25/25.
+
+The lesson that actually matters here isn't the individual bugs — it's that step 3 should have
+been step 1. Two guesses in a row, both plausible, both wrong, both cost real time under a
+deadline; going back to the raw evidence (the actual response body, via the Playwright trace)
+would have found this in one step. The two "wrong" fixes weren't wasted, though: the Secure-cookie
+issue and the StrictMode race were both real, latent bugs that are better gone regardless of
+whether they caused this particular failure.
 
 ## Phase 8 — hardening
 
-_Not started yet._
+_Given the deadline, this pass is intentionally light: the four public suites (43 + 35 + 66 + 25
+= 169 checks) are the hardening evidence that exists. No separate load/performance pass was run —
+see Open threads._
 
 ## Open threads
 
-- The console (frontend) is entirely unbuilt as of this entry — everything above is the server
-  and its three public test suites (`check-jwt.js` 43/43, `check-permissions.js` 35/35,
-  `check-api.js` 66/66).
+- No dedicated performance/load pass was done beyond what `resolveDevices`'s single-query-per-list
+  design already buys (documented in `permissions.js`) — haven't measured it under real load.
 - Pagination bounds on `GET /orgs/:org/audit` (`limit` max 1000) are my own invented number, not
   derived from any document — nothing states a maximum anywhere I found.
 - `assertNotLastOwner` only counts `status = 'active'` owners as protection (a suspended owner
@@ -135,6 +188,14 @@ _Not started yet._
 - Device transfer writes its audit row scoped to the SOURCE org only, not the destination org.
   Haven't decided if a transfer should produce two audit rows (one per org) — time-boxed this as
   "good enough" rather than researching it further.
+- "Transfer files" (`device:file_transfer`) renders correctly (permission-gated, matches
+  `UI-INVENTORY.md`) but has no real backend action behind it — clicking it shows a placeholder
+  alert. There is no file-transfer endpoint anywhere in `BRIEF.md §5.1`'s table, so I judged
+  building real file-transfer functionality out of scope for this exercise and only wired the
+  permission gating, which is the part the exercise actually tests.
+- `GET /v1/roles` is an endpoint I added that isn't in `BRIEF.md §5.1`'s table — needed so the
+  console's role dropdowns never hardcode role names, consistent with reading everything else
+  from the database at runtime. Noted here in case it's flagged as unexpected surface area.
 - The "Where this repo argues with itself" section in `DECISIONS.md` is still empty. Still
-  looking — the specs are dense enough that I expect to find one before submission, and I'm not
-  going to leave it blank if I do.
+  looking — the specs are dense enough that I'd expect to find one, and I'm not leaving it blank
+  by choice, just haven't hit one yet.

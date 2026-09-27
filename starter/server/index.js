@@ -1,14 +1,7 @@
-// The whole application: one process, one port.
-//
-//   /v1/*  -> the API (routes registered in server/routes/)
-//   else   -> the SPA (Vite middleware in dev for HMR, static dist/ in production)
-//
-// Run:  npm run dev     (one command, both halves, hot reload)
-//       npm run build && npm start
-
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { createRouter } from './router.js';
 import { openDatabase } from './db.js';
@@ -19,7 +12,15 @@ import { registerRoutes } from './routes/index.js';
 const DEV = process.env.NODE_ENV !== 'production';
 const PORT = Number(process.env.PORT ?? 8080);
 const SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
-const DIST = new URL('../dist/', import.meta.url).pathname;
+// fileURLToPath, not `.pathname` -- on Windows a file:// URL's .pathname keeps a
+// leading slash before the drive letter ('/C:/Rhinostream/...'), which join() then
+// mishandles, silently pointing every static file lookup at a path that doesn't
+// exist. In production this means index.html and the JS bundle 404 on every
+// request -- the page loads with an empty <div id="root">, no error, nothing ever
+// renders. This is the exact same bug we found and fixed in scripts/load-db.js,
+// just in the starter's server/index.js this time -- invisible on Linux/macOS,
+// where .pathname doesn't have a drive letter to duplicate.
+const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
 
 const db = openDatabase();
 const router = createRouter();
